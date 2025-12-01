@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>管理员控制台 - TOFD焊缝缺陷检测</title>
+
+  <!-- 方案A：固定服务器地址（局域网 C/S：用户无需填写） -->
+  <script>
+    // ✅ 打包前把这里改成你的服务器电脑局域网IP，例如：http://192.168.1.10:8000
+    window.__APP_CONFIG__ = {
+      API_BASE: "http://192.168.160.1:8000"
+    };
+  </script>
+
+  <!-- Vue3：改为本地部署 -->
+ <script src="./libs/vue.global.prod.js"></script>
+
+  <link rel="stylesheet" href="login.css">
+</head>
+
+<body>
+<div id="admin-app">
+  <div class="card admin-card">
+    <div class="logo">
+      <h1>管理员控制台</h1>
+    </div>
+
+    <div class="admin-header">
+      <div>当前管理员：{{ currentUser || '未登录' }}</div>
+      <button class="btn-small" @click="logout">退出登录</button>
+    </div>
+
+    <div class="admin-content">
+      <!-- 左侧：创建新用户 -->
+      <div class="admin-left">
+        <h2 class="admin-subtitle">创建新用户</h2>
+
+        <div class="form-group">
+          <label>用户名</label>
+          <input type="text" v-model="newUser.username" placeholder="例如：user6">
+        </div>
+
+        <div class="form-group">
+          <label>初始密码</label>
+          <input type="password" v-model="newUser.password" placeholder="例如：123456">
+        </div>
+
+        <div class="form-group">
+          <label>显示昵称（可选）</label>
+          <input type="text" v-model="newUser.display_name" placeholder="例如：张三">
+        </div>
+
+        <div class="form-group">
+          <label>角色</label>
+          <select v-model="newUser.role">
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+        </div>
+
+        <button class="btn" @click="createUser" :disabled="isLoading">
+          <span v-if="isLoading" class="loading"></span>
+          创建用户
+        </button>
+      </div>
+
+      <!-- 右侧：用户列表 -->
+      <div class="admin-right">
+        <h2 class="admin-subtitle">用户列表</h2>
+
+        <div v-if="loadError" class="error">{{ loadError }}</div>
+
+        <table class="user-table" v-if="users.length">
+          <thead>
+          <tr>
+            <th>ID</th>
+            <th>用户名</th>
+            <th>昵称</th>
+            <th>角色</th>
+            <th>状态</th>
+            <th>创建时间</th>
+            <th>操作</th>
+          </tr>
+          </thead>
+          <tbody>
+          <tr v-for="u in users" :key="u.id">
+            <td>{{ u.id }}</td>
+            <td>{{ u.username }}</td>
+            <td>{{ u.display_name || '-' }}</td>
+            <td>{{ u.role === 'admin' ? '管理员' : '普通用户' }}</td>
+            <td>
+              <span :style="{ color: u.is_active ? '#28a745' : '#dc3545' }">
+                {{ u.is_active ? '启用' : '禁用' }}
+              </span>
+            </td>
+            <td>{{ u.created_at || '-' }}</td>
+            <td>
+              <button class="btn-small" @click="toggleActive(u)">
+                {{ u.is_active ? '禁用' : '启用' }}
+              </button>
+              <button class="btn-small" @click="toggleRole(u)">
+                {{ u.role === 'admin' ? '设为普通用户' : '设为管理员' }}
+              </button>
+              <button class="btn-small" @click="resetPassword(u)">
+                重置密码
+              </button>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+
+        <div v-else class="muted">
+          暂无用户数据。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const { createApp, ref, reactive, onMounted } = Vue;
+
+  const API = (window.__APP_CONFIG__ && window.__APP_CONFIG__.API_BASE)
+    ? window.__APP_CONFIG__.API_BASE
+    : "http://127.0.0.1:8000";
+
+  createApp({
+    setup() {
+      const token = ref(localStorage.getItem('yolo_token') || '');
+      const role = ref(localStorage.getItem('yolo_role') || '');
+      const currentUser = ref(localStorage.getItem('yolo_user') || '');
+
+      const users = ref([]);
+      const isLoading = ref(false);
+      const loadError = ref('');
+
+      const newUser = reactive({
+        username: '',
+        password: '',
+        display_name: '',
+        role: 'user',
+      });
+
+      const checkAuth = () => {
+        if (!token.value || role.value !== 'admin') {
+          alert('请先使用管理员账号登录');
+          location.href = 'index.html';
+        }
+      };
+
+      const fetchUsers = async () => {
+        loadError.value = '';
+        try {
+          const url = API + '/api/admin/users?token=' + encodeURIComponent(token.value);
+          const r = await fetch(url);
+          const j = await r.json().catch(() => ({ error: '网络错误' }));
+          if (!r.ok) throw new Error(j.error || '获取用户列表失败');
+          users.value = j.items || [];
+        } catch (err) {
+          loadError.value = err.message || String(err);
+        }
+      };
+
+      const createUser = async () => {
+        if (!newUser.username.trim() || !newUser.password) {
+          alert('请输入用户名和密码');
+          return;
+        }
+        isLoading.value = true;
+        try {
+          const fd = new FormData();
+          fd.append('token', token.value);
+          fd.append('username', newUser.username.trim());
+          fd.append('password', newUser.password);
+          fd.append('display_name', (newUser.display_name || '').trim());
+          fd.append('role', newUser.role);
+
+          const r = await fetch(API + '/api/admin/users/create', { method: 'POST', body: fd });
+          const j = await r.json().catch(() => ({ error: '网络错误' }));
+          if (!r.ok) throw new Error(j.error || '创建用户失败');
+
+          newUser.username = '';
+          newUser.password = '';
+          newUser.display_name = '';
+          newUser.role = 'user';
+
+          await fetchUsers();
+        } catch (err) {
+          alert(err.message || String(err));
+        } finally {
+          isLoading.value = false;
+        }
+      };
+
+      const toggleActive = async (u) => {
+        try {
+          const fd = new FormData();
+          fd.append('token', token.value);
+          fd.append('user_id', String(u.id));
+          fd.append('is_active', u.is_active ? '0' : '1');
+
+          const r = await fetch(API + '/api/admin/users/update', { method: 'POST', body: fd });
+          const j = await r.json().catch(() => ({ error: '网络错误' }));
+          if (!r.ok) throw new Error(j.error || '更新用户状态失败');
+
+          await fetchUsers();
+        } catch (err) {
+          alert(err.message || String(err));
+        }
+      };
+
+      const toggleRole = async (u) => {
+        try {
+          const fd = new FormData();
+          fd.append('token', token.value);
+          fd.append('user_id', String(u.id));
+          fd.append('role', u.role === 'admin' ? 'user' : 'admin');
+
+          const r = await fetch(API + '/api/admin/users/update', { method: 'POST', body: fd });
+          const j = await r.json().catch(() => ({ error: '网络错误' }));
+          if (!r.ok) throw new Error(j.error || '更新角色失败');
+
+          await fetchUsers();
+        } catch (err) {
+          alert(err.message || String(err));
+        }
+      };
+
+      const resetPassword = async (u) => {
+        const pwd = prompt(`请输入用户 ${u.username} 的新密码：`, '123456');
+        if (!pwd) return;
+        try {
+          const fd = new FormData();
+          fd.append('token', token.value);
+          fd.append('user_id', String(u.id));
+          fd.append('password', pwd);
+
+          const r = await fetch(API + '/api/admin/users/reset_password', { method: 'POST', body: fd });
+          const j = await r.json().catch(() => ({ error: '网络错误' }));
+          if (!r.ok) throw new Error(j.error || '重置密码失败');
+
+          alert('密码已重置');
+        } catch (err) {
+          alert(err.message || String(err));
+        }
+      };
+
+      const logout = () => {
+        localStorage.removeItem('yolo_token');
+        localStorage.removeItem('yolo_user');
+        localStorage.removeItem('yolo_role');
+        location.href = 'index.html';
+      };
+
+      onMounted(async () => {
+        checkAuth();
+        await fetchUsers();
+      });
+
+      return {
+        currentUser,
+        users,
+        isLoading,
+        loadError,
+        newUser,
+        createUser,
+        toggleActive,
+        toggleRole,
+        resetPassword,
+        logout,
+      };
+    }
+  }).mount('#admin-app');
+</script>
+</body>
+</html>

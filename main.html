@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TOFD 焊缝缺陷检测</title>
+
+  <!-- 方案A：固定服务器地址（局域网 C/S：用户无需填写） -->
+  <script>
+    // ✅ 打包前把这里改成你的服务器电脑局域网IP，例如：http://192.168.1.10:8000
+    window.__APP_CONFIG__ = { API_BASE: "http://192.168.160.1:8000" };
+  </script>
+
+  <!-- Vue3：本地部署（优先 libs，其次 vendor） -->
+  <script src="./libs/vue.global.prod.js"></script>
+  <script>
+    if (!window.Vue) document.write('<script src="./vendor/vue.global.prod.js"><\/script>');
+  </script>
+
+  <link rel="stylesheet" href="main.css" />
+
+  <style>
+    .top-nav { display:flex; gap:10px; align-items:center; margin-left:14px; }
+    .top-nav .link-btn { padding: 8px 12px; border-radius: 12px; }
+    .top-nav .link-btn.active { background: rgba(59, 130, 246, .12); }
+    .result-actions { display:flex; gap:10px; align-items:center; justify-content:flex-end; flex-wrap:wrap; }
+    .pill { font-size:12px; padding:4px 10px; border-radius:999px; background:rgba(59,130,246,.10); color:#2563eb; }
+    .hint { font-size:12px; color: rgba(0,0,0,.55); }
+  </style>
+</head>
+
+<body>
+<div id="app">
+  <header class="app-header">
+    <div class="app-title">
+      <div>
+        <h1>TOFD 焊缝缺陷检测</h1>
+        <p class="subtitle">选择焊缝图，点击一次按钮，自动完成检测</p>
+      </div>
+
+      <div class="top-nav">
+        <button class="link-btn active" @click="goMain">检测</button>
+        <button class="link-btn" @click="goHistory">历史记录</button>
+      </div>
+    </div>
+
+    <div class="user-area">
+      <span class="user-name">您好，{{ username }}</span>
+      <button class="link-btn" @click="logout">退出登录</button>
+    </div>
+  </header>
+
+  <main class="app-main" v-if="token">
+    <section class="panel primary-panel">
+      <h2 class="panel-title">一步完成缺陷检测</h2>
+      <p class="panel-desc">
+        第一步：把焊缝图拖进来或点击选择<br>
+        第二步：点击“开始检测”<br>
+        检测完成后，点击文件列表可快速定位结果。
+      </p>
+
+      <div class="upload-area"
+           :class="{ 'upload-area--active': dragOver }"
+           @click="openFileDialog"
+           @dragover.prevent="onDragOver"
+           @dragleave.prevent="onDragLeave"
+           @drop.prevent="onDrop">
+        <input type="file" ref="fileInput" multiple accept="image/*" @change="onFileChange" hidden>
+        <div class="upload-icon">⬆️</div>
+        <p class="upload-main-text">点击这里选择焊缝图，或把图片拖到这里</p>
+        <p class="upload-sub-text">支持多张图片（JPG / PNG 等）</p>
+      </div>
+
+      <div class="preview-wrapper" v-if="selectedFiles.length">
+        <h3 class="small-title">已选择的图片（{{ selectedFiles.length }}）</h3>
+        <div class="preview-list">
+          <div class="preview-item" v-for="(file, idx) in selectedFiles" :key="idx">
+            <div class="preview-thumb" v-if="file.previewUrl">
+              <img :src="file.previewUrl" :alt="file.name" title="点击放大查看"
+                   @click.stop="openZoom(file.previewUrl)">
+            </div>
+            <div class="preview-info" @click="scrollToResult(idx)" title="点击定位右侧检测结果">
+              <div class="preview-name">{{ file.name }}</div>
+              <div class="preview-meta">
+                {{ humanSize(file.size) }}
+                <span v-if="file.width && file.height"> · {{ file.width }}×{{ file.height }}</span>
+                <span style="color: var(--accent); margin-left: 6px; font-weight: bold;">👉 定位结果</span>
+              </div>
+            </div>
+            <button class="btn-small danger" @click.stop="removeFile(idx)">移除</button>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn-primary main-action-btn" :disabled="!selectedFiles.length || isBusy"
+              @click="runDetection">
+        <span v-if="isBusy">正在上传并检测，请稍候…</span>
+        <span v-else-if="!selectedFiles.length">请选择焊缝图片后再开始检测</span>
+        <span v-else>开始检测</span>
+      </button>
+
+      <p v-if="statusMessage" :class="['status-banner', statusType]">{{ statusMessage }}</p>
+
+      <details class="advanced" v-if="showAdvanced">
+        <summary>高级选项（可选）</summary>
+        <div class="advanced-content">
+          <label class="field">
+            <span class="field-label">置信度阈值</span>
+            <div class="range-row">
+              <input type="range" min="0.1" max="0.9" step="0.05" v-model.number="conf">
+              <span class="range-value">{{ conf.toFixed(2) }}</span>
+            </div>
+          </label>
+          <label class="field folder-field">
+            <span class="field-label">选择整个文件夹</span>
+            <input type="file" webkitdirectory multiple @change="onFolderChange">
+          </label>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel result-panel">
+      <div class="result-header">
+        <div class="result-header-left">
+          <h2 class="panel-title">本次检测结果</h2>
+          <div class="hint" style="margin-top:6px;">
+            服务器：{{ API }} <span class="pill" title="当前展示内容来源">{{ viewSourceText }}</span>
+          </div>
+        </div>
+
+        <div class="result-header-right result-actions">
+          <span class="tag-count">共 {{ detections.length }} 张</span>
+
+          <button class="btn-small" :disabled="!detections.length" @click="exportCurrent">
+            导出当前结果
+          </button>
+
+          <button class="btn-small"
+                  v-if="currentHistoryId"
+                  :disabled="!detections.length"
+                  @click="exportAsHistory">
+            导出该条历史
+          </button>
+
+          <button class="link-btn" @click="goHistory">去历史记录页</button>
+        </div>
+      </div>
+
+      <div v-if="isPredicting" class="result-empty">
+        <div class="result-icon">⏳</div>
+        <p>正在分析图像并标出焊缝缺陷…</p>
+      </div>
+
+      <div v-else-if="detections.length" class="result-grid">
+        <article
+          class="result-card"
+          v-for="(det, idx) in detections"
+          :key="idx"
+          :id="'result-card-' + idx"
+        >
+          <div class="result-image-wrapper">
+            <img
+              :src="decodeImageUrl(det.img_url)"
+              :alt="det.filename"
+              title="点击放大查看"
+              @error="onImageError(idx)"
+              @click="openZoom(decodeImageUrl(det.img_url))"
+            >
+          </div>
+          <div class="result-info">
+            <div class="result-title">图片 {{ idx + 1 }}</div>
+            <div class="result-meta" style="color: var(--ink);">{{ det.filename }}</div>
+            <p class="result-meta">
+              检测到缺陷：<strong>{{ det.boxes ? det.boxes.length : 0 }}</strong>
+            </p>
+          </div>
+        </article>
+      </div>
+
+      <div v-else class="result-empty">
+        <p>还没有检测结果</p>
+        <p class="hint">你也可以去“历史记录”页选择一条记录，然后点“在检测页查看”。</p>
+      </div>
+    </section>
+  </main>
+
+  <main class="app-main" v-else>
+    <section class="panel">
+      <h2>登录状态已失效</h2>
+      <button class="btn-primary" @click="goLogin">返回登录页</button>
+    </section>
+  </main>
+
+  <div class="image-modal" v-if="previewImage" @click="closeZoom">
+    <span class="image-modal-close" @click="closeZoom">&times;</span>
+    <img :src="previewImage" alt="全屏查看" @click.stop>
+  </div>
+</div>
+
+<script>
+  const { createApp, ref, computed, onMounted } = Vue;
+
+  const API = (window.__APP_CONFIG__ && window.__APP_CONFIG__.API_BASE)
+    ? window.__APP_CONFIG__.API_BASE.replace(/\/+$/, '')
+    : "http://127.0.0.1:8000";
+
+  createApp({
+    setup() {
+      const username = ref(localStorage.getItem('yolo_user') || '用户');
+      const token = ref(localStorage.getItem('yolo_token') || '');
+
+      const selectedFiles = ref([]);
+      const dragOver = ref(false);
+      const fileInput = ref(null);
+
+      const isUploading = ref(false);
+      const isPredicting = ref(false);
+      const statusMessage = ref('');
+      const statusType = ref('ok');
+
+      const conf = ref(0.25);
+      const detections = ref([]);
+      const showAdvanced = ref(true);
+      const previewImage = ref(null);
+
+      const uploadSessionId = ref('');
+      const currentHistoryId = ref(null);
+      const currentHistoryTime = ref('');
+
+      const isBusy = computed(() => isUploading.value || isPredicting.value);
+      const viewSourceText = computed(() => currentHistoryId.value ? `历史记录 #${currentHistoryId.value}` : '本次检测');
+
+      const setStatus = (msg, type = 'ok') => {
+        statusMessage.value = msg;
+        statusType.value = type === 'error' ? 'error' : 'ok';
+        if (!msg) return;
+        setTimeout(() => (statusMessage.value = ''), 4000);
+      };
+
+      const humanSize = (bytes) => {
+        if (!bytes && bytes !== 0) return '';
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let i = 0, num = bytes;
+        while (num >= 1024 && i < units.length - 1) { num /= 1024; i++; }
+        return num.toFixed(1) + ' ' + units[i];
+      };
+
+      const openZoom = (url) => { if (url) previewImage.value = url; };
+      const closeZoom = () => { previewImage.value = null; };
+
+      const decodeImageUrl = (url) => {
+        if (!url) return '';
+        if (/^https?:\/\//i.test(url)) return url;
+        const clean = String(url).replace(/\\/g, '/');
+        const path = clean.startsWith('/') ? clean : '/' + clean;
+        return API + path;
+      };
+
+      const openFileDialog = () => { if (fileInput.value) fileInput.value.click(); };
+      const onFileChange = (e) => { addFiles(Array.from(e.target.files || [])); e.target.value = ''; };
+      const onFolderChange = (e) => { addFiles(Array.from(e.target.files || [])); e.target.value = ''; };
+      const onDragOver = () => { dragOver.value = true; };
+      const onDragLeave = () => { dragOver.value = false; };
+      const onDrop = (e) => { dragOver.value = false; addFiles(Array.from(e.dataTransfer.files || [])); };
+
+      const addFiles = (files) => {
+        const imageFiles = files.filter(f => f.type.startsWith('image/'));
+        if (!imageFiles.length) return setStatus('没有检测到图片文件。', 'error');
+
+        imageFiles.forEach(file => {
+          const item = { raw: file, name: file.name, size: file.size, width: null, height: null, previewUrl: '' };
+          const url = URL.createObjectURL(file);
+          item.previewUrl = url;
+
+          const img = new Image();
+          img.onload = () => { item.width = img.naturalWidth; item.height = img.naturalHeight; };
+          img.src = url;
+
+          selectedFiles.value.push(item);
+        });
+        setStatus(`已选择 ${selectedFiles.value.length} 张图片。`, 'ok');
+      };
+
+      const removeFile = (idx) => {
+        const [removed] = selectedFiles.value.splice(idx, 1);
+        if (removed && removed.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      };
+
+      const scrollToResult = (idx) => {
+        if (detections.value.length === 0) return setStatus('请先生成或加载检测结果。', 'error');
+        const targetFile = selectedFiles.value[idx];
+        if (!targetFile) return;
+
+        const resultIndex = detections.value.findIndex(det => det.filename === targetFile.name);
+        if (resultIndex !== -1) {
+          const el = document.getElementById('result-card-' + resultIndex);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+          setStatus(`结果中未找到文件：${targetFile.name}`, 'error');
+        }
+      };
+
+      // ========= 核心：session_id 版本 上传 + 检测 =========
+      const runDetection = async () => {
+        if (!token.value) return setStatus('登录状态失效。', 'error');
+        if (!selectedFiles.value.length) return setStatus('请先选择图片。', 'error');
+
+        detections.value = [];
+        uploadSessionId.value = '';
+        currentHistoryId.value = null;
+        currentHistoryTime.value = '';
+
+        try {
+          // 1) 上传：返回 session_id
+          isUploading.value = true;
+          setStatus('正在上传图片…', 'ok');
+          const fd = new FormData();
+          fd.append('token', token.value);
+          selectedFiles.value.forEach(item => fd.append('files', item.raw, item.name));
+
+          const rUpload = await fetch(API + '/api/upload', { method: 'POST', body: fd });
+          const jUpload = await rUpload.json().catch(() => ({}));
+          if (!rUpload.ok) throw new Error(jUpload.error || '上传失败');
+          if (!jUpload.session_id) throw new Error('上传成功但缺少 session_id，请检查后端实现。');
+          uploadSessionId.value = jUpload.session_id;
+
+          isUploading.value = false;
+          setStatus('上传成功，开始检测…', 'ok');
+
+          // 2) 检测：带 session_id
+          isPredicting.value = true;
+          const fdPredict = new FormData();
+          fdPredict.append('token', token.value);
+          fdPredict.append('session_id', uploadSessionId.value);
+          fdPredict.append('conf', String(conf.value));
+
+          const rPredict = await fetch(API + '/api/predict', { method: 'POST', body: fdPredict });
+          const j = await rPredict.json().catch(() => ({}));
+          if (!rPredict.ok) throw new Error(j.error || '检测失败');
+
+          detections.value = j.detections || [];
+          setStatus(`检测完成，共 ${detections.value.length} 张结果。`, 'ok');
+        } catch (err) {
+          console.error(err);
+          setStatus(err.message || String(err), 'error');
+        } finally {
+          isUploading.value = false;
+          isPredicting.value = false;
+        }
+      };
+
+      // ========= 从服务器加载历史详情 =========
+      const loadHistoryById = async (id) => {
+        if (!token.value) return setStatus('登录状态失效。', 'error');
+        if (!id) return;
+
+        try {
+          setStatus('正在加载历史记录详情…', 'ok');
+          const url = API + '/api/history/' + id + '?token=' + encodeURIComponent(token.value);
+          const r = await fetch(url);
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || '加载历史详情失败');
+
+          detections.value = j.detections || [];
+          currentHistoryId.value = Number(id);
+          currentHistoryTime.value = j.time || '';
+
+          // 滚到结果面板
+          setTimeout(() => {
+            const panel = document.querySelector('.result-panel');
+            if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }, 0);
+
+          setStatus('已加载一条历史检测结果。', 'ok');
+        } catch (err) {
+          console.error(err);
+          setStatus(err.message || String(err), 'error');
+        }
+      };
+
+      // ========= 导出：选择文件夹（Electron） =========
+      const exportDetections = async ({ suggestedName, dets, meta }) => {
+        // 1) 检查 Electron bridge
+        if (!window.tofd || typeof window.tofd.exportDetections !== 'function') {
+          return setStatus('导出功能仅在桌面客户端可用（请确认已配置 preload.js / ipcMain）。', 'error');
+        }
+        // 2) 去 Proxy：否则会报 An object could not be cloned.
+        const plain = JSON.parse(JSON.stringify(dets || []));
+        try {
+          const res = await window.tofd.exportDetections({
+            apiBase: API,
+            suggestedName,
+            detections: plain,
+            meta: meta || {}
+          });
+          if (res && res.canceled) return;
+          if (!res || !res.ok) throw new Error((res && res.error) || '导出失败');
+          setStatus(`导出成功：已保存 ${res.saved || 0} 张`, 'ok');
+        } catch (e) {
+          console.error(e);
+          setStatus(e.message || String(e), 'error');
+        }
+      };
+
+      const exportCurrent = async () => {
+        if (!detections.value.length) return setStatus('当前没有可导出的结果。', 'error');
+
+        const name = currentHistoryId.value
+          ? `history_${currentHistoryId.value}`
+          : `session_${uploadSessionId.value || 'current'}`;
+
+        await exportDetections({
+          suggestedName: name,
+          dets: detections.value,
+          meta: {
+            username: username.value,
+            source: currentHistoryId.value ? 'history' : 'current',
+            history_id: currentHistoryId.value,
+            history_time: currentHistoryTime.value,
+            session_id: uploadSessionId.value,
+            conf: conf.value
+          }
+        });
+      };
+
+      const exportAsHistory = async () => {
+        if (!currentHistoryId.value) return setStatus('当前展示的不是历史记录。', 'error');
+        await exportCurrent();
+      };
+
+      const onImageError = (idx) => console.warn('图片加载失败', idx);
+
+      const logout = () => {
+        localStorage.removeItem('yolo_token');
+        localStorage.removeItem('yolo_user');
+        localStorage.removeItem('yolo_role');
+        location.href = 'index.html';
+      };
+      const goLogin = () => { location.href = 'index.html'; };
+      const goHistory = () => { location.href = 'history.html'; };
+      const goMain = () => { location.href = 'main.html'; };
+
+      // ✅ 接力：history 页点“在检测页查看”后，main 页自动加载
+      onMounted(async () => {
+        const pendingId = localStorage.getItem('tofd_open_history_id');
+        if (pendingId) {
+          localStorage.removeItem('tofd_open_history_id');
+          await loadHistoryById(pendingId);
+        }
+      });
+
+      return {
+        username, token,
+        selectedFiles, dragOver, fileInput,
+        isUploading, isPredicting, isBusy,
+        statusMessage, statusType,
+        conf, detections, showAdvanced,
+        previewImage,
+        API,
+        currentHistoryId,
+        viewSourceText,
+
+        openZoom, closeZoom,
+        openFileDialog, onFileChange, onFolderChange,
+        onDragOver, onDragLeave, onDrop,
+        addFiles, removeFile, scrollToResult,
+        runDetection, decodeImageUrl, onImageError,
+
+        exportCurrent, exportAsHistory,
+
+        logout, goLogin, goHistory, goSettings, goMain,
+        humanSize
+      };
+    }
+  }).mount('#app');
+</script>
+</body>
+</html>

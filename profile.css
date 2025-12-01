@@ -1,0 +1,28 @@
+/* profile.css - 首页专用样式 */
+
+.kv {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kv .k {
+  display: inline-block;
+  min-width: 80px;
+  color: var(--ink-light);
+  font-size: 13px;
+}
+
+.kv .v {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pill {
+  font-size: 12px;
+  color: var(--accent);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e9f3ff;
+  border: 1px solid #cfe5ff;
+}

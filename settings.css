@@ -1,0 +1,33 @@
+/* settings.css - 设置页面专用样式 */
+
+.kv {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kv .k {
+  display: inline-block;
+  min-width: 90px;
+  color: var(--ink-light);
+  font-size: 13px;
+}
+
+.kv .v {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.tips {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink);
+  line-height: 1.8;
+}
+
+.tips code {
+  background: #f1f3f5;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid #e6e6e6;
+}

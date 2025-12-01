@@ -1,0 +1,296 @@
+/* ======================================= */
+/* 亮色主题登录卡片样式 */
+/* ======================================= */
+
+/* 核心颜色变量 (重新定义，保持一致性) */
+:root {
+    --background: #f4f6f9;        /* 页面背景: 浅灰色 */
+    --panel-bg: #ffffff;          /* 卡片/面板背景: 纯白色 */
+    --ink: #1a1a1a;               /* 主要文字颜色: 深黑色 */
+    --ink-light: #555555;         /* 次要文字颜色: 中灰 */
+    --accent: #007bff;            /* 强调色/主色: 蓝色 */
+    --accent-hover: #0056b3;      /* 强调色悬停: 深蓝色 */
+    --input-bg: #f8f8f8;          /* 输入框背景 */
+    --input-border: #cccccc;      /* 输入框边框 */
+    --error: #dc3545;             /* 错误色: 红色 */
+    --success: #28a745;           /* 成功色: 绿色 */
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1); /* 柔和阴影 */
+}
+
+/* 页面背景和居中 */
+body {
+    background: var(--background);
+    color: var(--ink);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+/* 登录卡片样式 */
+.card {
+    background: var(--panel-bg);
+    padding: 30px 40px;
+    border-radius: 14px;
+    /* 亮色主题使用柔和的阴影 */
+    box-shadow: 0 0 20px rgba(0,0,0,0.15);
+    width: 320px;
+    transition: all 0.3s ease;
+    border: 1px solid #e0e0e0;
+}
+
+/* 晃动动画 */
+.card-shake {
+    animation: shake 0.5s ease-in-out;
+}
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+}
+
+/* 标题和Logo */
+h1 {
+    margin-top: 0;
+    text-align: center;
+    margin-bottom: 25px;
+    color: var(--accent);
+    font-size: 24px;
+}
+.logo {
+    text-align: center;
+    margin-bottom: 10px;
+}
+.logo-icon {
+    font-size: 24px;
+    margin-right: 8px;
+    vertical-align: middle;
+    color: var(--accent);
+}
+
+/* 表单组 */
+.form-group {
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 13px;
+    color: var(--ink-light); /* 使用中灰色作为标签色 */
+    font-weight: 500;
+}
+
+/* 输入框 */
+input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--input-border);
+    border-radius: 8px;
+    background: var(--input-bg);
+    color: var(--ink);
+    box-sizing: border-box;
+    transition: border-color 0.3s;
+}
+
+.input-error {
+    border-color: var(--error);
+}
+
+input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.2); /* 柔和的焦点阴影 */
+    background: var(--panel-bg);
+}
+
+/* 错误信息 */
+.error {
+    color: var(--error);
+    font-size: 12px;
+    margin-top: 5px;
+    display: block;
+    height: 16px;
+}
+
+/* 按钮 */
+.btn {
+    margin-top: 20px;
+    width: 100%;
+    padding: 12px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background 0.3s, opacity 0.3s;
+    position: relative;
+    box-shadow: 0 4px 8px rgba(0, 123, 255, 0.2);
+}
+
+.btn:hover {
+    background: var(--accent-hover);
+}
+
+.btn:disabled {
+    background: var(--accent);
+    opacity: 0.6;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+/* 加载动画 */
+.loading {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.5);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: spin 1s ease-in-out infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* 辅助文字 */
+.muted {
+    color: var(--ink-light);
+    font-size: 13px;
+    margin-top: 20px;
+    display: block;
+    text-align: center;
+}
+
+/* 成功信息 */
+.success-message {
+    background: rgba(40, 167, 69, 0.1); /* 浅绿色背景 */
+    border: 1px solid rgba(40, 167, 69, 0.5);
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 15px;
+    text-align: center;
+    color: var(--success);
+    font-size: 14px;
+}
+/* 顶部入口切换按钮：用户入口 / 管理员入口 */
+.tab-switch {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 18px;
+    padding: 4px;
+    border-radius: 999px;
+    background-color: #f1f3f5;
+}
+
+.tab-btn {
+    border: none;
+    background: transparent;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--ink-light);
+}
+
+.tab-btn--active {
+    background: #ffffff;
+    color: var(--accent);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+/* 用户入口内部：登录 / 注册模式切换 */
+.mode-switch {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.mode-btn {
+    border: none;
+    background: transparent;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--ink-light);
+}
+
+.mode-btn--active {
+    background: #e9f3ff;
+    color: var(--accent);
+}
+
+/* 管理员页面布局 */
+.admin-card {
+    width: 900px;
+    max-width: 95vw;
+}
+
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    font-size: 14px;
+    color: var(--ink-light);
+}
+
+.admin-content {
+    display: flex;
+    gap: 24px;
+    margin-top: 8px;
+}
+
+.admin-left,
+.admin-right {
+    flex: 1;
+    min-width: 0;
+}
+
+.admin-subtitle {
+    font-size: 16px;
+    margin: 8px 0 12px;
+    color: var(--ink);
+}
+
+/* 用户表格 */
+.user-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.user-table th,
+.user-table td {
+    border-bottom: 1px solid #eeeeee;
+    padding: 6px 8px;
+    text-align: left;
+}
+
+.user-table th {
+    background-color: #f7f7f9;
+}
+
+/* 小按钮（管理员页操作按钮） */
+.btn-small {
+    border: none;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-right: 4px;
+    background: #f1f3f5;
+    color: var(--ink);
+}
+
+.btn-small:hover {
+    background: #e0e0e0;
+}

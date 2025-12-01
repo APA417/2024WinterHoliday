@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>登录 - TOFD焊缝缺陷检测</title>
+
+  <!-- 方案A：固定服务器地址（局域网 C/S：用户无需填写） -->
+  <script>
+    // ✅ 打包前把这里改成你的服务器电脑局域网IP，例如：http://192.168.1.10:8000
+    window.__APP_CONFIG__ = {
+      API_BASE: "http://192.168.160.1:8000"
+    };
+  </script>
+
+ <script src="./libs/vue.global.prod.js"></script>
+
+  <!-- 复用原有样式 -->
+  <link rel="stylesheet" href="login.css" />
+</head>
+
+<body>
+<div id="app">
+  <div class="card" :class="{ 'card-shake': loginError }">
+    <div class="logo">
+      <span class="logo-icon">🔍</span>
+      <h1>TOFD 焊缝缺陷检测</h1>
+    </div>
+
+    <!-- 顶部：用户入口 / 管理员入口 -->
+    <div class="tab-switch">
+      <button
+        class="tab-btn"
+        :class="{ 'tab-btn--active': activeTab === 'user' }"
+        @click="switchTab('user')"
+      >
+        用户入口
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ 'tab-btn--active': activeTab === 'admin' }"
+        @click="switchTab('admin')"
+      >
+        管理员入口
+      </button>
+    </div>
+
+    <!-- 用户入口：登录  -->
+    <div v-if="activeTab === 'user'">
+      <div class="mode-switch">
+        <button
+          class="mode-btn"
+          :class="{ 'mode-btn--active': userMode === 'login' }"
+          @click="userMode = 'login'"
+        >
+          登录
+        </button>
+      </div>
+
+      <div class="form-group">
+        <label for="user">用户名</label>
+        <input
+          id="user"
+          type="text"
+          placeholder="请输入用户名"
+          v-model="username"
+          @keyup.enter="handleUserSubmit"
+          :class="{ 'input-error': userUsernameError }"
+        >
+        <span class="error">{{ userUsernameError }}</span>
+      </div>
+
+      <div class="form-group">
+        <label for="pass">密码</label>
+        <input
+          id="pass"
+          type="password"
+          placeholder="请输入密码"
+          v-model="password"
+          @keyup.enter="handleUserSubmit"
+          :class="{ 'input-error': userPasswordError }"
+        >
+        <span class="error">{{ userPasswordError }}</span>
+      </div>
+
+      <div class="form-group" v-if="userMode === 'register'">
+        <label for="pass2">确认密码</label>
+        <input
+          id="pass2"
+          type="password"
+          placeholder="请再次输入密码"
+          v-model="confirmPassword"
+          @keyup.enter="handleUserSubmit"
+          :class="{ 'input-error': userConfirmError }"
+        >
+        <span class="error">{{ userConfirmError }}</span>
+      </div>
+
+      <button class="btn" @click="handleUserSubmit" :disabled="isLoading">
+        <span v-if="isLoading" class="loading"></span>
+        <span v-if="!isLoading">
+          {{ userMode === 'login' ? '登录' : '注册' }}
+        </span>
+        <span v-else>
+          {{ userMode === 'login' ? '登录中...' : '注册中...' }}
+        </span>
+      </button>
+    </div>
+
+    <!-- 管理员入口：仅登录 -->
+    <div v-else>
+      <div class="form-group">
+        <label for="admin-user">管理员账号</label>
+        <input
+          id="admin-user"
+          type="text"
+          placeholder="请输入管理员账号"
+          v-model="adminUsername"
+          @keyup.enter="handleAdminLogin"
+          :class="{ 'input-error': adminUsernameError }"
+        >
+        <span class="error">{{ adminUsernameError }}</span>
+      </div>
+
+      <div class="form-group">
+        <label for="admin-pass">管理员密码</label>
+        <input
+          id="admin-pass"
+          type="password"
+          placeholder="请输入管理员密码"
+          v-model="adminPassword"
+          @keyup.enter="handleAdminLogin"
+          :class="{ 'input-error': adminPasswordError }"
+        >
+        <span class="error">{{ adminPasswordError }}</span>
+      </div>
+
+      <button class="btn" @click="handleAdminLogin" :disabled="isLoading">
+        <span v-if="isLoading" class="loading"></span>
+        {{ isLoading ? '登录中...' : '管理员登录' }}
+      </button>
+    </div>
+
+    <div v-if="successMessage" class="success-message">
+      {{ successMessage }}
+    </div>
+
+    <span class="muted">
+      用户入口支持登录与注册；管理员请使用管理员入口登录。
+    </span>
+  </div>
+</div>
+
+<script>
+  const { createApp, ref, computed } = Vue;
+
+  const API = (window.__APP_CONFIG__ && window.__APP_CONFIG__.API_BASE)
+    ? window.__APP_CONFIG__.API_BASE
+    : "http://127.0.0.1:8000";
+
+  createApp({
+    setup() {
+      const activeTab = ref('user');       // user / admin
+      const userMode = ref('login');       // login / register
+
+      // 用户端
+      const username = ref('');
+      const password = ref('');
+      const confirmPassword = ref('');
+
+      // 管理员端
+      const adminUsername = ref('');
+      const adminPassword = ref('');
+
+      const isLoading = ref(false);
+      const loginError = ref(false);
+      const successMessage = ref('');
+
+      const shakeCard = () => {
+        loginError.value = true;
+        setTimeout(() => (loginError.value = false), 400);
+      };
+
+      const clearMessage = () => {
+        successMessage.value = '';
+      };
+
+      const switchTab = (tab) => {
+        activeTab.value = tab;
+        clearMessage();
+        loginError.value = false;
+      };
+
+      // ============ 用户端表单校验 ============
+      const userUsernameError = computed(() => {
+        if (activeTab.value !== 'user') return '';
+        if (!username.value.trim()) return '请输入用户名';
+        if (username.value.trim().length < 3) return '用户名至少 3 个字符';
+        return '';
+      });
+
+      const userPasswordError = computed(() => {
+        if (activeTab.value !== 'user') return '';
+        if (!password.value) return '请输入密码';
+        if (password.value.length < 4) return '密码至少 4 个字符';
+        return '';
+      });
+
+      const userConfirmError = computed(() => {
+        if (activeTab.value !== 'user' || userMode.value !== 'register') return '';
+        if (!confirmPassword.value) return '请再次输入密码';
+        if (confirmPassword.value !== password.value) return '两次输入的密码不一致';
+        return '';
+      });
+
+      // ============ 管理员表单校验 ============
+      const adminUsernameError = computed(() => {
+        if (activeTab.value !== 'admin') return '';
+        if (!adminUsername.value.trim()) return '请输入管理员账号';
+        return '';
+      });
+
+      const adminPasswordError = computed(() => {
+        if (activeTab.value !== 'admin') return '';
+        if (!adminPassword.value) return '请输入密码';
+        return '';
+      });
+
+      // ============ 用户登录 / 注册 ============
+      const handleUserSubmit = async () => {
+        if (userUsernameError.value || userPasswordError.value || userConfirmError.value) {
+          shakeCard();
+          return;
+        }
+
+        isLoading.value = true;
+        clearMessage();
+
+        try {
+          const fd = new FormData();
+          fd.append('username', username.value.trim());
+          fd.append('password', password.value);
+
+          const url = userMode.value === 'login' ? '/api/login' : '/api/register';
+          const r = await fetch(API + url, { method: 'POST', body: fd });
+          const j = await r.json().catch(() => ({ error: '网络错误' }));
+
+          if (!r.ok) {
+            throw new Error(j.error || (userMode.value === 'login' ? '登录失败' : '注册失败'));
+          }
+
+          localStorage.setItem('yolo_token', j.token || '');
+          localStorage.setItem('yolo_user', j.username || username.value.trim());
+          localStorage.setItem('yolo_role', j.role || 'user');
+
+          successMessage.value =
+            userMode.value === 'login'
+              ? `登录成功！欢迎 ${j.username || username.value.trim()}`
+              : `注册成功并已登录！欢迎 ${j.username || username.value.trim()}`;
+
+          setTimeout(() => {
+            location.href = 'main.html';
+          }, 800);
+        } catch (err) {
+          shakeCard();
+          successMessage.value = '';
+          alert(err.message || String(err));
+        } finally {
+          isLoading.value = false;
+        }
+      };
+
+      // ============ 管理员登录 ============
+      const handleAdminLogin = async () => {
+        if (adminUsernameError.value || adminPasswordError.value) {
+          shakeCard();
+          return;
+        }
+
+        isLoading.value = true;
+        clearMessage();
+
+        try {
+          const fd = new FormData();
+          fd.append('username', adminUsername.value.trim());
+          fd.append('password', adminPassword.value);
+
+          const r = await fetch(API + '/api/login', { method: 'POST', body: fd });
+          const j = await r.json().catch(() => ({ error: '网络错误' }));
+
+          if (!r.ok) {
+            throw new Error(j.error || '登录失败');
+          }
+          if (j.role !== 'admin') {
+            throw new Error('该账号不是管理员');
+          }
+
+          localStorage.setItem('yolo_token', j.token || '');
+          localStorage.setItem('yolo_user', j.username || adminUsername.value.trim());
+          localStorage.setItem('yolo_role', j.role || 'admin');
+
+          successMessage.value = `管理员登录成功：${j.username || adminUsername.value.trim()}`;
+
+          setTimeout(() => {
+            location.href = 'admin.html';
+          }, 800);
+        } catch (err) {
+          shakeCard();
+          successMessage.value = '';
+          alert(err.message || String(err));
+        } finally {
+          isLoading.value = false;
+        }
+      };
+
+      return {
+        activeTab, userMode,
+        username, password, confirmPassword,
+        adminUsername, adminPassword,
+        isLoading, loginError, successMessage,
+
+        switchTab,
+        userUsernameError, userPasswordError, userConfirmError,
+        adminUsernameError, adminPasswordError,
+
+        handleUserSubmit,
+        handleAdminLogin,
+      };
+    }
+  }).mount('#app');
+</script>
+</body>
+</html>

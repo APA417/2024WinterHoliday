@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>历史记录 - TOFD 焊缝缺陷检测</title>
+
+  <script src="./config.js"></script>
+  <script src="./libs/vue.global.prod.js"></script>
+
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+<div id="app">
+  <header class="app-header">
+    <div class="app-title">
+      <div>
+        <h1>历史记录</h1>
+        <p class="subtitle">按账号跨设备共享：从服务器加载历史（可导出到本机）</p>
+      </div>
+    </div>
+    <div class="user-area">
+      <span class="user-name">您好，{{ username }}</span>
+      <button class="link-btn" @click="logout">退出登录</button>
+    </div>
+  </header>
+
+  <nav class="top-nav" v-if="token">
+    <button class="nav-btn" :class="{active: isActive('profile.html')}" @click="go('profile.html')">首页</button>
+    <button class="nav-btn" :class="{active: isActive('main.html')}" @click="go('main.html')">开始检测</button>
+    <button class="nav-btn" :class="{active: isActive('history.html')}" @click="go('history.html')">历史记录</button>
+    <button class="nav-btn" :class="{active: isActive('settings.html')}" @click="go('settings.html')">设置</button>
+  </nav>
+
+  <main class="app-main" v-if="token">
+    <!-- 左：历史列表（带搜索与刷新） -->
+    <section class="panel">
+      <div class="panel-row">
+        <h2 class="panel-title" style="margin:0;">记录列表</h2>
+        <button class="btn-soft" @click="fetchHistoryList" :disabled="isLoading">
+          {{ isLoading ? '刷新中…' : '刷新' }}
+        </button>
+      </div>
+
+      <div class="form-row">
+        <input class="text-input" v-model="q" placeholder="搜索：文件名 / 时间（例如 2025-11）">
+        <select class="text-input" v-model="sortMode" style="max-width:160px;">
+          <option value="new">最新在前</option>
+          <option value="old">最旧在前</option>
+        </select>
+      </div>
+
+      <div v-if="errorMsg" class="status-banner error">{{ errorMsg }}</div>
+
+      <div v-if="filteredList.length" class="history-list" style="max-height: calc(100vh - 260px);">
+        <article
+          class="history-item"
+          v-for="(item, idx) in filteredList"
+          :key="item.id || idx"
+          :class="{ 'history-item--active': selected && selected.id === item.id }"
+          @click="selectItem(item)"
+        >
+          <div class="history-main">
+            <div class="history-title">#{{ item.id }} · {{ formatTime(item.time) }}</div>
+            <div class="history-meta">
+              <span>共 {{ item.count }} 张</span>
+              <span v-if="item.files && item.files.length">
+                · {{ item.files.slice(0,2).join(' / ') }}<span v-if="item.files.length>2">…</span>
+              </span>
+            </div>
+          </div>
+          <span class="pill">查看</span>
+        </article>
+      </div>
+
+      <div v-else class="result-empty">
+        <p>暂无历史记录</p>
+      </div>
+    </section>
+
+    <!-- 右：详情（结果图网格 + 导出） -->
+    <section class="panel result-panel">
+      <div class="result-header">
+        <div class="result-header-left">
+          <h2 class="panel-title" style="margin:0;">记录详情</h2>
+        </div>
+        <div class="result-header-right">
+          <span class="tag-count">共 {{ detailDetections.length }} 张</span>
+
+          <button class="link-btn" v-if="selected" @click="openInDetect">
+            在检测页查看
+          </button>
+
+          <button
+            class="link-btn"
+            v-if="selected && detailDetections.length && hasExporter"
+            @click="exportSelected"
+            :disabled="isExporting"
+          >
+            {{ isExporting ? '导出中…' : '导出本条历史' }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="detailLoading" class="result-empty">
+        <p>正在加载详情…</p>
+      </div>
+
+      <div v-else-if="!selected" class="result-empty">
+        <p>请先从左侧选择一条历史记录</p>
+      </div>
+
+      <div v-else-if="detailDetections.length" class="result-grid">
+        <article class="result-card" v-for="(det, idx) in detailDetections" :key="idx">
+          <div class="result-image-wrapper">
+            <img
+              :src="decodeImageUrl(det.img_url)"
+              :alt="det.filename"
+              title="点击放大查看"
+              @click="openZoom(decodeImageUrl(det.img_url))"
+            >
+          </div>
+          <div class="result-info">
+            <div class="result-title">图片 {{ idx + 1 }}</div>
+            <div class="result-meta" style="color: var(--ink);">{{ det.filename }}</div>
+            <p class="result-meta">
+              缺陷数：<strong>{{ det.boxes ? det.boxes.length : 0 }}</strong>
+            </p>
+          </div>
+        </article>
+      </div>
+
+      <div v-else class="result-empty">
+        <p>该记录没有结果</p>
+      </div>
+    </section>
+  </main>
+
+  <main class="app-main" v-else>
+    <section class="panel">
+      <h2>登录状态已失效</h2>
+      <button class="btn-primary" @click="goLogin">返回登录页</button>
+    </section>
+  </main>
+
+  <div class="image-modal" v-if="previewImage" @click="closeZoom">
+    <span class="image-modal-close" @click="closeZoom">&times;</span>
+    <img :src="previewImage" alt="全屏查看" @click.stop>
+  </div>
+</div>
+
+<script>
+  const { createApp, ref, computed } = Vue;
+
+  const API = (window.__APP_CONFIG__ && window.__APP_CONFIG__.API_BASE)
+    ? window.__APP_CONFIG__.API_BASE
+    : "http://127.0.0.1:8000";
+
+  createApp({
+    setup() {
+      const username = ref(localStorage.getItem('yolo_user') || '用户');
+      const token = ref(localStorage.getItem('yolo_token') || '');
+      const role = ref(localStorage.getItem('yolo_role') || 'user');
+
+      const q = ref('');
+      const sortMode = ref('new');
+
+      const list = ref([]);
+      const isLoading = ref(false);
+      const errorMsg = ref('');
+
+      const selected = ref(null);
+      const detailDetections = ref([]);
+      const detailLoading = ref(false);
+
+      const previewImage = ref(null);
+      const isExporting = ref(false);
+
+      const hasExporter = computed(() => !!(window.tofd && typeof window.tofd.exportDetections === 'function'));
+
+      const requireAuth = () => {
+        if (!token.value) location.href = 'index.html';
+      };
+
+      const isActive = (page) => {
+        const cur = (location.pathname || '').split('/').pop() || '';
+        return cur === page;
+      };
+      const go = (page) => location.href = page;
+
+      const formatTime = (iso) => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return iso;
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const h = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return `${y}-${m}-${day} ${h}:${min}`;
+      };
+
+      const decodeImageUrl = (url) => {
+        if (!url) return '';
+        if (/^https?:\/\//i.test(url)) return url;
+        const clean = String(url).replace(/\\/g, '/');
+        const base = String(API).replace(/\/+$/, '');
+        const p = clean.startsWith('/') ? clean : '/' + clean;
+        return base + p;
+      };
+
+      const fetchHistoryList = async () => {
+        if (!token.value) return;
+        isLoading.value = true;
+        errorMsg.value = '';
+        try {
+          const url = API + '/api/history/list?token=' + encodeURIComponent(token.value) + '&limit=100';
+          const r = await fetch(url);
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || '获取历史记录失败');
+          list.value = j.items || [];
+        } catch (e) {
+          console.error(e);
+          errorMsg.value = e.message || String(e);
+        } finally {
+          isLoading.value = false;
+        }
+      };
+
+      const filteredList = computed(() => {
+        const keyword = q.value.trim().toLowerCase();
+        let arr = Array.isArray(list.value) ? [...list.value] : [];
+        arr.sort((a, b) => sortMode.value === 'new' ? (b.id - a.id) : (a.id - b.id));
+        if (!keyword) return arr;
+
+        return arr.filter(item => {
+          const t = String(item.time || '').toLowerCase();
+          const files = (item.files || []).join(' / ').toLowerCase();
+          const id = String(item.id || '');
+          return t.includes(keyword) || files.includes(keyword) || id.includes(keyword);
+        });
+      });
+
+      const selectItem = async (item) => {
+        if (!item || !item.id) return;
+        selected.value = item;
+        detailDetections.value = [];
+        detailLoading.value = true;
+        errorMsg.value = '';
+
+        try {
+          const url = API + '/api/history/' + item.id + '?token=' + encodeURIComponent(token.value);
+          const r = await fetch(url);
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || '加载历史详情失败');
+          detailDetections.value = j.detections || [];
+        } catch (e) {
+          console.error(e);
+          errorMsg.value = e.message || String(e);
+        } finally {
+          detailLoading.value = false;
+        }
+      };
+
+      const openZoom = (url) => { if (url) previewImage.value = url; };
+      const closeZoom = () => { previewImage.value = null; };
+
+      // ✅ 关键：把 Vue Proxy 转成纯 JSON（去 Proxy），再交给 IPC
+      const toPlain = (v) => {
+        try { return JSON.parse(JSON.stringify(v)); }
+        catch { return []; }
+      };
+
+      const exportSelected = async () => {
+        if (!hasExporter.value) return;
+        if (!selected.value || !detailDetections.value.length) return;
+
+        isExporting.value = true;
+        try {
+          const payload = {
+            apiBase: API,
+            detections: toPlain(detailDetections.value), // ✅ 这里去 Proxy
+            suggestedName: `TOFD_${String(username.value)}_history_${String(selected.value.id)}`,
+            meta: {
+              type: "history",
+              username: String(username.value),
+              history_id: Number(selected.value.id),
+              time: String(selected.value.time || "")
+            }
+          };
+
+          const res = await window.tofd.exportDetections(payload);
+
+          if (!res || !res.ok) {
+            if (res && res.canceled) return;
+            throw new Error((res && res.error) ? res.error : '导出失败');
+          }
+        } catch (e) {
+          alert(e.message || '导出失败');
+        } finally {
+          isExporting.value = false;
+        }
+      };
+
+      const openInDetect = () => {
+        location.href = 'main.html';
+      };
+
+      const logout = () => {
+        localStorage.removeItem('yolo_token');
+        localStorage.removeItem('yolo_user');
+        localStorage.removeItem('yolo_role');
+        location.href = 'index.html';
+      };
+      const goLogin = () => { location.href = 'index.html'; };
+
+      requireAuth();
+      fetchHistoryList();
+
+      return {
+        username, token, role,
+        q, sortMode,
+        list, filteredList, isLoading, errorMsg,
+        selected, detailDetections, detailLoading,
+        previewImage,
+        hasExporter, isExporting,
+        isActive, go,
+        fetchHistoryList, selectItem,
+        formatTime, decodeImageUrl,
+        openZoom, closeZoom,
+        exportSelected, openInDetect,
+        logout, goLogin
+      };
+    }
+  }).mount('#app');
+</script>
+
+<style>
+  .panel-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;}
+  .form-row{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;}
+  .text-input{
+    flex: 1;
+    min-width: 220px;
+    padding: 10px 12px;
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    background: #f8f8f8;
+    outline: none;
+  }
+  .history-item--active{border: 2px solid var(--accent) !important; background: #e9f3ff;}
+  .pill{font-size:12px;color:var(--accent);padding:4px 10px;border-radius:999px;background:#e9f3ff;border:1px solid #cfe5ff;}
+</style>
+</body>
+</html>

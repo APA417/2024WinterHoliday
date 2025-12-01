@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>首页 - TOFD 焊缝缺陷检测</title>
+
+  <script src="./config.js"></script>
+  <script src="./vendor/vue.global.prod.js"></script>
+   <script src="./libs/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+<div id="app">
+  <header class="app-header">
+    <div class="app-title">
+      <div>
+        <h1>首页</h1>
+        <p class="subtitle">查看账号信息、连接状态、最近检测记录</p>
+      </div>
+    </div>
+    <div class="user-area">
+      <span class="user-name">您好，{{ username }}</span>
+      <button class="link-btn" @click="logout">退出登录</button>
+    </div>
+  </header>
+
+  <nav class="top-nav" v-if="token">
+    <button class="nav-btn" :class="{active: isActive('profile.html')}" @click="go('profile.html')">首页</button>
+    <button class="nav-btn" :class="{active: isActive('main.html')}" @click="go('main.html')">开始检测</button>
+    <button class="nav-btn" :class="{active: isActive('history.html')}" @click="go('history.html')">历史记录</button>
+  </nav>
+
+  <main class="app-main" v-if="token">
+    <section class="panel">
+      <h2 class="panel-title">账号信息</h2>
+      <div class="kv">
+        <div><span class="k">用户名</span><span class="v">{{ username }}</span></div>
+        <div><span class="k">角色</span><span class="v">{{ role === 'admin' ? '管理员' : '普通用户' }}</span></div>
+        <div><span class="k">服务器</span><span class="v">{{ API }}</span></div>
+        <div><span class="k">导出能力</span><span class="v">{{ hasExporter ? '可用（Electron）' : '不可用（浏览器/未接入）' }}</span></div>
+      </div>
+
+      <div class="soft-actions" style="margin-top:14px;">
+        <button class="btn-soft" @click="go('main.html')">开始一次检测</button>
+        <button class="btn-soft" @click="go('history.html')">查看历史记录</button>
+        <button class="btn-soft" @click="go('settings.html')">打开设置</button>
+      </div>
+    </section>
+
+    <section class="panel result-panel">
+      <div class="result-header">
+        <div class="result-header-left">
+          <h2 class="panel-title" style="margin:0;">最近历史（服务器）</h2>
+        </div>
+        <div class="result-header-right">
+          <button class="link-btn" @click="refresh" :disabled="loading">
+            {{ loading ? '刷新中…' : '刷新' }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="err" class="status-banner error">{{ err }}</div>
+
+      <div v-if="items.length" class="history-list" style="max-height: calc(100vh - 220px);">
+        <article class="history-item" v-for="it in items" :key="it.id" @click="go('history.html')">
+          <div class="history-main">
+            <div class="history-title">#{{ it.id }} · {{ formatTime(it.time) }}</div>
+            <div class="history-meta">共 {{ it.count }} 张</div>
+          </div>
+          <span class="pill">进入</span>
+        </article>
+      </div>
+
+      <div v-else class="result-empty">
+        <p>暂无历史记录</p>
+      </div>
+    </section>
+  </main>
+
+  <main class="app-main" v-else>
+    <section class="panel">
+      <h2>登录状态已失效</h2>
+      <button class="btn-primary" @click="goLogin">返回登录页</button>
+    </section>
+  </main>
+</div>
+
+<script>
+  const { createApp, ref, computed } = Vue;
+  const API = (window.__APP_CONFIG__ && window.__APP_CONFIG__.API_BASE)
+    ? window.__APP_CONFIG__.API_BASE
+    : "http://127.0.0.1:8000";
+
+  createApp({
+    setup() {
+      const username = ref(localStorage.getItem('yolo_user') || '用户');
+      const token = ref(localStorage.getItem('yolo_token') || '');
+      const role = ref(localStorage.getItem('yolo_role') || 'user');
+
+      const items = ref([]);
+      const loading = ref(false);
+      const err = ref('');
+
+      const hasExporter = computed(() => !!(window.tofd && typeof window.tofd.exportDetections === 'function'));
+
+      const isActive = (page) => ((location.pathname || '').split('/').pop() || '') === page;
+      const go = (page) => location.href = page;
+
+      const requireAuth = () => { if (!token.value) location.href = 'index.html'; };
+
+      const formatTime = (iso) => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return iso;
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const h = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return `${y}-${m}-${day} ${h}:${min}`;
+      };
+
+      const refresh = async () => {
+        if (!token.value) return;
+        loading.value = true;
+        err.value = '';
+        try {
+          const r = await fetch(API + '/api/history/list?token=' + encodeURIComponent(token.value) + '&limit=10');
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || '加载历史失败');
+          items.value = j.items || [];
+        } catch(e) {
+          err.value = e.message || String(e);
+        } finally {
+          loading.value = false;
+        }
+      };
+
+      const logout = () => {
+        localStorage.removeItem('yolo_token');
+        localStorage.removeItem('yolo_user');
+        localStorage.removeItem('yolo_role');
+        location.href = 'index.html';
+      };
+      const goLogin = () => { location.href = 'index.html'; };
+
+      requireAuth();
+      refresh();
+
+      return { username, token, role, API, items, loading, err, hasExporter, isActive, go, refresh, formatTime, logout, goLogin };
+    }
+  }).mount('#app');
+</script>
+
+<style>
+  .kv{display:flex;flex-direction:column;gap:10px;}
+  .kv .k{display:inline-block;min-width:80px;color:var(--ink-light);font-size:13px;}
+  .kv .v{font-weight:600;color:var(--ink);}
+  .pill{font-size:12px;color:var(--accent);padding:4px 10px;border-radius:999px;background:#e9f3ff;border:1px solid #cfe5ff;}
+</style>
+</body>
+</html>
